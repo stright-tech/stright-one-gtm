@@ -1,5 +1,5 @@
 homepage: "https://www.bizris.com/stright/jp"
 documentation: "https://github.com/stright-tech/stright-one-gtm/blob/main/README.md"
 versions:
-  - sha: 94d3c9398be8fcc46e33b7b67602163fdfce265f
+  - sha: 836b0ddd2a29aff9ab273d288dcc353560e5e7c8
     changeNotes: Initial release.
