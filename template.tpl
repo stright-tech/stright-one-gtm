@@ -652,10 +652,6 @@ ___WEB_PERMISSIONS___
             "listItem": [
               {
                 "type": 1,
-                "string": "https://cdn1.example.com/js/*"
-              },
-              {
-                "type": 1,
                 "string": "https://*.stright.bizris.com/*"
               }
             ]
