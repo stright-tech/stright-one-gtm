@@ -253,6 +253,7 @@ ___SANDBOXED_JS_FOR_WEB_TEMPLATE___
 
 const injectScript = require("injectScript");
 const encodeUriComponent = require("encodeUriComponent");
+const encodeUri = require("encodeUri");
 const logToConsole = require("logToConsole");
 const setDefaultConsentState = require("setDefaultConsentState");
 const updateConsentState = require("updateConsentState");
@@ -298,7 +299,7 @@ var config = {
 
 // setting 用スクリプト URL とキャッシュキーを組み立てる
 function buildSettingUrl(cfg) {
-  var baseUrl = "https://" + cfg.srcUrl + "/js/cookie_consent_setting.js";
+  var baseUrl = "https://" + encodeUri(cfg.srcUrl) + "/js/cookie_consent_setting.js";
   var scriptSrc = baseUrl + "?banner_type=banner";
 
   if (cfg.dataSiteId) {
