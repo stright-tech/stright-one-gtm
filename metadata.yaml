@@ -1,5 +1,10 @@
 homepage: "https://www.bizris.com/stright/jp"
 documentation: "https://github.com/stright-tech/stright-one-gtm/blob/main/README.md"
 versions:
+  - sha: 094f9d36aa6380f3cc17f403b7e4f708080f8552
+    changeNotes: |2
+      - 「全て拒否」後にページを再読み込みすると、同意状態が既定値（granted）に戻る不具合を修正
+      - CMP developer ID（developer_id.dZTE2OD）の送信を追加
+      - テンプレートのテストシナリオを追加
   - sha: d19cdddd7576bfe021e08660eedf2f83a3379429
-    changeNotes: Initial release.
+    changeNotes: 初回リリース
