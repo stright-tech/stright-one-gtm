@@ -260,6 +260,7 @@ const updateConsentState = require("updateConsentState");
 const getCookieValues = require("getCookieValues");
 const JSON = require("JSON");
 const createArgumentsQueue = require("createArgumentsQueue");
+const gtagSet = require("gtagSet");
 
 var WAIT_FOR_UPDATE_MS = 500;
 
@@ -511,7 +512,10 @@ function getGcmTypesFromCookie(cmd) {
     return null;
   }
 
-  if (!cData.gGcType || !cData.gGcType.length) {
+  // gGcType が無い場合のみ Cookie 無し扱いにする。
+  // 空配列は「全て拒否済み」を意味するため、そのまま返して全 denied の default にする
+  // （null にするとテーブルの既定値に戻ってしまい、オプトアウト設定では granted になる）
+  if (!cData.gGcType) {
     return null;
   }
 
@@ -587,6 +591,9 @@ function run() {
 
   var gtag = createArgumentsQueue("gtag", "dataLayer");
 
+  // Google に CMP（STRiGHT）を識別させる developer ID を設定（同意モードの利用有無に関わらず常に実行）
+  gtagSet("developer_id.dZTE2OD", true);
+
   // ① GCM デフォルト同意を設定（Cookie があればそれを優先）
   if (config.googleConsentMode === true) {
     // AlwaysActive/AlwaysNotActive はキー単位で強制し、それ以外は Cookie を参照
@@ -654,6 +661,32 @@ ___WEB_PERMISSIONS___
               {
                 "type": 1,
                 "string": "https://*.stright.bizris.com/*"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "clientAnnotations": {
+      "isEditedByUser": true
+    },
+    "isRequired": true
+  },
+  {
+    "instance": {
+      "key": {
+        "publicId": "write_data_layer",
+        "versionId": "1"
+      },
+      "param": [
+        {
+          "key": "keyPatterns",
+          "value": {
+            "type": 2,
+            "listItem": [
+              {
+                "type": 1,
+                "string": "developer_id.dZTE2OD"
               }
             ]
           }
@@ -1063,7 +1096,263 @@ ___WEB_PERMISSIONS___
 
 ___TESTS___
 
-scenarios: []
+scenarios:
+- name: Google同意モードOFF - 同意状態を設定せずスクリプトをロードする
+  code: |-
+    mockData.googleConsentMode = false;
+    noCookie();
+
+    runCode(mockData);
+
+    assertApi('setDefaultConsentState').wasNotCalled();
+    assertApi('updateConsentState').wasNotCalled();
+    assertApi('injectScript').wasCalled();
+    assertApi('gtmOnSuccess').wasCalled();
+- name: Cookieなし + オプトアウト - テーブルどおりgrantedのdefaultを設定する
+  code: |-
+    noCookie();
+
+    runCode(mockData);
+
+    assertThat(defaultCalls).hasLength(1);
+    assertThat(defaultCalls[0]).isEqualTo({
+      wait_for_update: 500,
+      ad_storage: 'granted',
+      ad_user_data: 'granted',
+      ad_personalization: 'granted',
+      analytics_storage: 'granted',
+      functionality_storage: 'granted',
+      personalization_storage: 'granted',
+      security_storage: 'granted'
+    });
+    assertApi('updateConsentState').wasNotCalled();
+    assertApi('gtmOnSuccess').wasCalled();
+- name: Cookieなし + オプトイン - deniedのdefaultを設定する
+  code: |-
+    mockData.googleConsentModeConfiguration = OPT_IN_TABLE;
+    noCookie();
+
+    runCode(mockData);
+
+    assertThat(defaultCalls).hasLength(1);
+    assertThat(defaultCalls[0]).isEqualTo({
+      wait_for_update: 500,
+      ad_storage: 'denied',
+      ad_user_data: 'denied',
+      ad_personalization: 'denied',
+      analytics_storage: 'denied',
+      functionality_storage: 'denied',
+      personalization_storage: 'denied',
+      security_storage: 'denied'
+    });
+    assertApi('updateConsentState').wasNotCalled();
+- name: Cookieなし + リージョン別設定 - リージョン限定のdefaultを追加で設定する
+  code: |-
+    mockData.regionConsentOverrides = [{
+      regionCode: 'JP, cn',
+      performanceRegionCategory: 'Off',
+      functionalRegionCategory: 'default',
+      targetingRegionCategory: 'On',
+      securityRegionCategory: 'default'
+    }];
+    noCookie();
+
+    runCode(mockData);
+
+    assertThat(defaultCalls).hasLength(2);
+    assertThat(defaultCalls[1]).isEqualTo({
+      wait_for_update: 500,
+      region: ['JP', 'CN'],
+      analytics_storage: 'denied',
+      ad_storage: 'granted',
+      ad_user_data: 'granted',
+      ad_personalization: 'granted'
+    });
+- name: Cookieあり（一部許可） - 全deniedのdefault後にCookieのキーだけupdateでgrantedにする
+  code: |-
+    setCookie('{"cmd":"example.com","gGcType":["ad_storage","ad_user_data","analytics_storage"]}');
+
+    runCode(mockData);
+
+    assertThat(defaultCalls).hasLength(1);
+    assertThat(defaultCalls[0]).isEqualTo(ALL_DENIED);
+    assertThat(updateCalls).hasLength(1);
+    assertThat(updateCalls[0]).isEqualTo({
+      ad_storage: 'granted',
+      ad_user_data: 'granted',
+      analytics_storage: 'granted'
+    });
+    assertApi('gtmOnSuccess').wasCalled();
+- name: Cookieあり（空配列＝全て拒否後） - オプトアウトでも全deniedを維持しupdateもリージョン設定も行わない
+  code: |-
+    // 「同意 → 全て拒否 → リロード」を再現する。リージョン別設定は適用されてはいけない
+    mockData.regionConsentOverrides = [{
+      regionCode: 'JP',
+      performanceRegionCategory: 'On',
+      functionalRegionCategory: 'On',
+      targetingRegionCategory: 'On',
+      securityRegionCategory: 'On'
+    }];
+    setCookie('{"cmd":"example.com","gGcType":[]}');
+
+    runCode(mockData);
+
+    assertThat(defaultCalls).hasLength(1);
+    assertThat(defaultCalls[0]).isEqualTo(ALL_DENIED);
+    assertApi('updateConsentState').wasNotCalled();
+    assertApi('gtmOnSuccess').wasCalled();
+- name: Cookieあり（空配列） + 常に許可 - 強制grantedのキーだけgrantedのまま残る
+  code: |-
+    mockData.googleConsentModeConfiguration = [
+      { category: 'performanceCategory', consentModel: 'OpOut' },
+      { category: 'functionalCategory', consentModel: 'OpOut' },
+      { category: 'targetingCategory', consentModel: 'OpOut' },
+      { category: 'securityCategory', consentModel: 'AlwaysActive' }
+    ];
+    setCookie('{"cmd":"example.com","gGcType":[]}');
+
+    runCode(mockData);
+
+    assertThat(defaultCalls).hasLength(1);
+    assertThat(defaultCalls[0]).isEqualTo({
+      ad_storage: 'denied',
+      ad_user_data: 'denied',
+      ad_personalization: 'denied',
+      analytics_storage: 'denied',
+      functionality_storage: 'denied',
+      personalization_storage: 'denied',
+      security_storage: 'granted'
+    });
+    assertApi('updateConsentState').wasNotCalled();
+- name: Cookieの許可キーが常に拒否 - Cookieの値で上書きせずupdateから除外する
+  code: |-
+    mockData.googleConsentModeConfiguration = [
+      { category: 'performanceCategory', consentModel: 'OpOut' },
+      { category: 'functionalCategory', consentModel: 'OpOut' },
+      { category: 'targetingCategory', consentModel: 'AlwaysNotActive' },
+      { category: 'securityCategory', consentModel: 'OpOut' }
+    ];
+    setCookie('{"cmd":"example.com","gGcType":["ad_storage","ad_user_data","ad_personalization","analytics_storage"]}');
+
+    runCode(mockData);
+
+    assertThat(defaultCalls).hasLength(1);
+    assertThat(defaultCalls[0]).isEqualTo(ALL_DENIED);
+    assertThat(updateCalls).hasLength(1);
+    assertThat(updateCalls[0]).isEqualTo({ analytics_storage: 'granted' });
+- name: Cookieのcmdがサイトドメインと不一致 - Cookieなし扱いでテーブルのdefaultを使う
+  code: |-
+    setCookie('{"cmd":"other.example.com","gGcType":[]}');
+
+    runCode(mockData);
+
+    assertThat(defaultCalls).hasLength(1);
+    assertThat(defaultCalls[0].wait_for_update).isEqualTo(500);
+    assertThat(defaultCalls[0].ad_storage).isEqualTo('granted');
+    assertApi('updateConsentState').wasNotCalled();
+- name: CookieがJSON形式でない - Cookieなし扱いでテーブルのdefaultを使う
+  code: |-
+    setCookie('not-json');
+
+    runCode(mockData);
+
+    assertThat(defaultCalls).hasLength(1);
+    assertThat(defaultCalls[0].wait_for_update).isEqualTo(500);
+    assertThat(defaultCalls[0].analytics_storage).isEqualTo('granted');
+    assertApi('updateConsentState').wasNotCalled();
+- name: スクリプトURL - サイトIDをdsiに付与しbanner_typeを指定する
+  code: |-
+    mockData.googleConsentMode = false;
+    noCookie();
+
+    runCode(mockData);
+
+    assertThat(injected.url).isEqualTo(
+      'https://cdn01.stright.bizris.com/js/cookie_consent_setting.js?banner_type=banner&dsi=SIT-00000000-0000-0000-0000-000000000000'
+    );
+    assertThat(injected.cacheToken).isEqualTo('https://cdn01.stright.bizris.com/js/cookie_consent_setting.js');
+- name: スクリプトロード失敗 - gtmOnFailureを呼ぶ
+  code: |-
+    mockData.googleConsentMode = false;
+    noCookie();
+    mock('injectScript', (url, onSuccess, onFailure) => {
+      onFailure();
+    });
+
+    runCode(mockData);
+
+    assertApi('gtmOnFailure').wasCalled();
+    assertApi('gtmOnSuccess').wasNotCalled();
+- name: developer ID - gtagSet で developer_id を true に設定する（同意モード OFF でも実行）
+  code: |-
+    mockData.googleConsentMode = false;
+    noCookie();
+
+    runCode(mockData);
+
+    assertApi('gtagSet').wasCalledWith('developer_id.dZTE2OD', true);
+    assertApi('gtmOnSuccess').wasCalled();
+setup: |-
+  // 共通のテンプレート設定（全カテゴリ オプトアウト = 既定 granted）
+  const mockData = {
+    dataSiteId: 'SIT-00000000-0000-0000-0000-000000000000',
+    srcUrl: 'cdn01.stright.bizris.com',
+    googleConsentMode: true,
+    googleConsentModeConfiguration: [
+      { category: 'performanceCategory', consentModel: 'OpOut' },
+      { category: 'functionalCategory', consentModel: 'OpOut' },
+      { category: 'targetingCategory', consentModel: 'OpOut' },
+      { category: 'securityCategory', consentModel: 'OpOut' }
+    ],
+    regionConsentOverrides: [],
+    siteDomain: 'example.com'
+  };
+
+  const OPT_IN_TABLE = [
+    { category: 'performanceCategory', consentModel: 'OptIn' },
+    { category: 'functionalCategory', consentModel: 'OptIn' },
+    { category: 'targetingCategory', consentModel: 'OptIn' },
+    { category: 'securityCategory', consentModel: 'OptIn' }
+  ];
+
+  // Cookie あり分岐で最初に設定される全 denied の状態（wait_for_update は含まない）
+  const ALL_DENIED = {
+    ad_storage: 'denied',
+    ad_user_data: 'denied',
+    ad_personalization: 'denied',
+    analytics_storage: 'denied',
+    functionality_storage: 'denied',
+    personalization_storage: 'denied',
+    security_storage: 'denied'
+  };
+
+  // 呼び出し内容の記録
+  const defaultCalls = [];
+  const updateCalls = [];
+  const injected = { url: null, cacheToken: null };
+
+  mock('setDefaultConsentState', (state) => {
+    defaultCalls.push(state);
+  });
+  mock('updateConsentState', (state) => {
+    updateCalls.push(state);
+  });
+  mock('createArgumentsQueue', () => {
+    return () => {};
+  });
+  mock('injectScript', (url, onSuccess, onFailure, cacheToken) => {
+    injected.url = url;
+    injected.cacheToken = cacheToken;
+    onSuccess();
+  });
+
+  // Cookie の有無を切り替えるヘルパー
+  const setCookie = (raw) => {
+    mock('getCookieValues', () => [raw]);
+  };
+  const noCookie = () => {
+    mock('getCookieValues', () => []);
+  };
 
 
 ___NOTES___

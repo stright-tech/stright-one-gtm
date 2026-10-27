@@ -20,7 +20,7 @@ STRiGHT ONEのクッキー同意管理ツールをGoogle Tag Manager経由でウ
 | Google同意モード | Google Consent Mode v2 の利用有無 |
 | Google同意モードの設定 | カテゴリごとの同意モデル（オプトイン / オプトアウト / 常に許可 / 常に拒否） |
 | リージョン別Google同意モードの設定 | リージョンコードごとの同意状態の上書き |
-| サイトドメイン | Cookie照合用のサイトドメイン |
+| サイトドメイン | Cookie照合用のサイトドメイン。`https://` やパスを付けず、ホスト名のみを指定してください（例: `www.example.com`）。STRiGHT ONE が発行する Cookie `cookie_consent_gcm_data` の `cmd` の値と完全一致している必要があり、一致しない場合は保存済みの同意状態が読み込まれず、毎回「Google同意モードの設定」の既定値が適用されます |
 
 ## Google Consent Mode v2
 
